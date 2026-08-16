@@ -651,15 +651,22 @@ export function heuristicVulnerabilities(input: HeuristicInput): {
     });
   }
 
-  for (const contradiction of heuristicContradictions(input).contradictions.slice(0, 4)) {
+  // As contradições NÃO são repetidas aqui: a aba Riscos já as exibe em seção
+  // própria, com os dois trechos lado a lado. Duplicá-las encheria a lista de
+  // vulnerabilidades com o mesmo conteúdo. Elas continuam pesando no risco.
+  const contradictionCount = heuristicContradictions(input).contradictions.length;
+  if (contradictionCount > 0) {
     findings.push({
-      title: contradiction.title,
-      description: contradiction.description,
-      rationale: 'Divergências numéricas entre peças costumam ser exploradas para atacar a credibilidade da narrativa.',
-      suggestion: 'Confira os dois trechos e, se houver erro material, providencie a retificação antes que a parte contrária aponte.',
-      severity: contradiction.severity,
+      title: `${contradictionCount} divergência(s) numérica(s) entre as peças`,
+      description:
+        'Foram identificadas divergências de valor ou data entre documentos diferentes. Cada uma está detalhada, com os dois trechos em confronto, na seção Contradições.',
+      rationale:
+        'Divergências numéricas entre peças costumam ser exploradas para atacar a credibilidade da narrativa.',
+      suggestion:
+        'Confira os dois trechos de cada divergência e, se houver erro material, providencie a retificação antes que a parte contrária aponte.',
+      severity: 'MEDIUM',
       confidence: 'LOW',
-      refs: [contradiction.sideA.ref, contradiction.sideB.ref],
+      refs: [],
     });
   }
 
@@ -739,8 +746,9 @@ export function heuristicAdversarial(input: HeuristicInput): AdversarialOut {
   const counterArguments: FindingOut[] = [];
 
   for (const gap of evidenceMap.gaps.slice(0, 5)) {
+    const label = shortLabel(gap.claim, 70);
     opponentArguments.push({
-      title: 'Ataque à ausência de prova',
+      title: `Ausência de prova: ${label}`,
       description: `A parte contrária tende a sustentar que a alegação a seguir não veio acompanhada de prova: "${gap.claim}"`,
       rationale: 'Alegações sem lastro documental são o alvo mais barato e mais eficaz da defesa.',
       suggestion: null,
@@ -749,9 +757,9 @@ export function heuristicAdversarial(input: HeuristicInput): AdversarialOut {
       refs: [],
     });
     counterArguments.push({
-      title: 'Possível resposta',
+      title: `Resposta possível: ${label}`,
       description:
-        'Localizar e juntar a prova correspondente, ou demonstrar que o fato é incontroverso / de conhecimento comum / objeto de inversão do ônus da prova, conforme o caso.',
+        'Localizar e juntar a prova correspondente, ou demonstrar que o fato é incontroverso, de conhecimento comum ou objeto de inversão do ônus da prova, conforme o caso.',
       rationale: 'Enfrentar a ausência antes que ela seja apontada reduz o dano.',
       suggestion: 'Verificar se a prova já existe fora da plataforma antes de considerar produzi-la.',
       severity: 'MEDIUM',
@@ -764,16 +772,24 @@ export function heuristicAdversarial(input: HeuristicInput): AdversarialOut {
   const opposingSentences = sentences.filter(
     (s) => s.documentKind === 'ANSWER' && containsAny(s.text, DEFENSE_TERMS),
   );
-  for (const sentence of opposingSentences.slice(0, 6)) {
+  const seenArguments = new Set<string>();
+  for (const sentence of opposingSentences) {
+    const label = shortLabel(sentence.text, 70);
+    const key = normalizeText(label);
+    if (seenArguments.has(key)) continue;
+    seenArguments.add(key);
+
     opponentArguments.push({
-      title: 'Argumento já deduzido pela parte contrária',
+      title: `Já deduzido na defesa: ${label}`,
       description: truncateQuote(sentence.text, 600),
-      rationale: 'Este argumento consta literalmente da defesa apresentada nos autos.',
+      rationale: 'Este argumento consta literalmente da contestação apresentada nos autos.',
       suggestion: null,
       severity: 'MEDIUM',
       confidence: 'MEDIUM',
       refs: [sentence.ref],
     });
+
+    if (seenArguments.size >= 6) break;
   }
 
   const likelyQuestions = evidenceMap.gaps

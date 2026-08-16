@@ -588,7 +588,10 @@ async function persistAnalysis(input: PersistInput): Promise<PersistResult> {
         await createFinding(
           FindingType.EVIDENCE_GAP,
           {
-            title: 'Alegação sem prova localizada',
+            // O título carrega um recorte da alegação: numa lista de sete
+            // lacunas, títulos idênticos obrigariam a abrir cada uma para
+            // saber do que se trata.
+            title: `Sem prova: ${shortClaimLabel(gap.claim)}`,
             description: gap.claim,
             rationale: gap.note,
             severity: 'HIGH',
@@ -672,6 +675,15 @@ function collectAnalysisRefs(type: AnalysisType, payload: Record<string, unknown
     }
   }
   return [...new Set(refs)];
+}
+
+/** Recorte curto de uma alegação, para distinguir achados numa lista. */
+function shortClaimLabel(text: string, max = 90): string {
+  const clean = text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(a autora|o autor|a r[ée]|o r[ée]u|a parte autora|a parte r[ée])\s+/i, '');
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
 }
 
 function summarize(type: AnalysisType, payload: Record<string, unknown>): string {
