@@ -428,6 +428,22 @@ async function persistAnalysis(input: PersistInput): Promise<PersistResult> {
   const droppedRefs: string[] = [];
   let citationsCount = 0;
 
+  // Uma nova execução SUBSTITUI a anterior do mesmo tipo.
+  //
+  // A interface sempre mostra a análise mais recente de cada tipo; sem esta
+  // limpeza, reexecutar "Encontrar vulnerabilidades" empilharia os mesmos
+  // achados e o contador do processo cresceria sem parar. O registro em
+  // `ai_analyses` é preservado — o que sai são os achados órfãos da execução
+  // anterior (as citações caem junto, por cascade).
+  await prisma.finding.deleteMany({
+    where: {
+      processId: input.processId,
+      organizationId: input.organizationId,
+      analysisId: { not: input.analysisId },
+      analysis: { type: input.type },
+    },
+  });
+
   const createFinding = async (
     type: FindingType,
     finding: {
