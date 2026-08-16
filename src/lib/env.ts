@@ -63,6 +63,22 @@ const schema = z.object({
   QUEUE_INLINE_WORKER: booleanish.default(true),
   QUEUE_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
 
+  EMAIL_PROVIDER: z.enum(['none', 'resend', 'sendgrid', 'smtp']).default('none'),
+  EMAIL_FROM: z.string().email().default('noreply@legalmind.local'),
+  EMAIL_FROM_NAME: z.string().default('LegalMind AI'),
+  RESEND_API_KEY: z.string().optional(),
+  SENDGRID_API_KEY: z.string().optional(),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  INVITE_BASE_URL: z.string().url().default('http://localhost:3000'),
+
+  DATAJUD_ENABLED: booleanish.default(false),
+  DATAJUD_API_KEY: z.string().optional(),
+  DATAJUD_BASE_URL: z.string().url().default('https://api-publica.datajud.cnj.jus.br'),
+  DATAJUD_TRIBUNAL_INDEX: z.string().default('api_publica_tjgo'),
+
   PAYMENT_PROVIDER: z.enum(['none', 'stripe', 'mercadopago']).default('none'),
   PAYMENT_SECRET: z.string().optional(),
   PAYMENT_WEBHOOK_SECRET: z.string().optional(),

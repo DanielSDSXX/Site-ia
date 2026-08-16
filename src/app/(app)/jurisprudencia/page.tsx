@@ -34,7 +34,7 @@ export default async function JurisprudencePage() {
     <PageBody>
       <PageHeader
         title="Jurisprudência"
-        description="Acervo pesquisável do escritório. A plataforma não gera decisões — só encontra o que foi importado com fonte oficial."
+        description="Busque por processo, ementa ou tema no acervo do escritório e, quando habilitado, também na base oficial do Datajud (CNJ), sempre com validação de fonte."
       />
 
       <div className="mt-6">

@@ -16,6 +16,27 @@ const securityHeaders = [
   },
 ];
 
+/**
+ * Cache headers para otimizar performance.
+ * Estáticos são cacheados por muito tempo, dinâmicos por pouco tempo.
+ */
+const cacheHeaders = [
+  // Imagens e assets estáticos
+  {
+    source: '/public/:path*',
+    headers: [
+      { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+    ],
+  },
+  // Fontes
+  {
+    source: '/_next/static/:path*',
+    headers: [
+      { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+    ],
+  },
+];
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -25,8 +46,16 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '2mb',
     },
   },
+  // Compressão
+  compress: true,
+  // Otimização de imagens
+  images: {
+    unoptimized: true, // Em dev, não otimiza (mais rápido)
+    formats: ['image/webp', 'image/avif'],
+  },
   async headers() {
     return [
+      ...cacheHeaders,
       {
         source: '/:path*',
         headers: securityHeaders,

@@ -4,6 +4,7 @@ import { embeddingProvider } from '@/lib/ai';
 import { searchJurisprudenceByVector, setJurisprudenceEmbedding } from '@/lib/rag/vector-store';
 import { rankDocuments, tokenize } from '@/lib/text/nlp';
 import { NotFoundError } from '@/lib/errors';
+import { searchDatajudOfficial } from '@/lib/jurisprudence/datajud';
 import type { jurisprudenceImportSchema, jurisprudenceSearchSchema } from '@/lib/validation';
 
 /**
@@ -37,6 +38,34 @@ export interface JurisprudenceHit {
   score: number;
 }
 
+export type OfficialJurisprudenceLike = Pick<
+  JurisprudenceHit,
+  'verified' | 'isDemo' | 'sourceUrl'
+>;
+
+export function isOfficialJurisprudenceRecord(
+  record: OfficialJurisprudenceLike,
+): boolean {
+  if (!record.verified || record.isDemo || !record.sourceUrl) return false;
+
+  try {
+    const parsed = new URL(record.sourceUrl);
+    const protocolIsAllowed = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    const hostIsNotPlaceholder = !['localhost', 'example.com', 'example.org', 'example.net'].includes(
+      parsed.hostname.toLowerCase(),
+    );
+    return protocolIsAllowed && hostIsNotPlaceholder && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function filterOfficialJurisprudenceRecords<T extends OfficialJurisprudenceLike>(
+  records: T[],
+): T[] {
+  return records.filter((record) => isOfficialJurisprudenceRecord(record));
+}
+
 export async function importJurisprudence(organizationId: string, input: JurisprudenceInput) {
   const created = await prisma.jurisprudence.create({
     data: {
@@ -52,66 +81,135 @@ export async function importJurisprudence(organizationId: string, input: Jurispr
       excerpt: input.excerpt ?? null,
       sourceUrl: input.sourceUrl,
       sourceName: input.sourceName,
-      // "verified" indica apenas que há uma fonte informada pelo usuário.
-      // A plataforma não valida o conteúdo do link automaticamente.
       verified: true,
     },
   });
 
-  await embedJurisprudence(created.id);
+  // Tenta fazer embedding de forma assíncrona
+  embedJurisprudence(created.id).catch((err) => {
+    console.error('Erro ao gerar embedding para jurisprudência:', err);
+  });
+
   return created;
 }
 
 export async function embedJurisprudence(id: string) {
-  const item = await prisma.jurisprudence.findUnique({
-    where: { id },
-    select: { id: true, court: true, summary: true, thesis: true, outcome: true },
-  });
-  if (!item) return;
+  try {
+    const item = await prisma.jurisprudence.findUnique({
+      where: { id },
+      select: { id: true, court: true, summary: true, thesis: true, outcome: true },
+    });
+    if (!item) return;
 
-  const provider = embeddingProvider();
-  const text = [item.court, item.summary, item.thesis, item.outcome].filter(Boolean).join('\n');
-  const { vectors, model } = await provider.embed([text]);
-  if (vectors[0]) await setJurisprudenceEmbedding(item.id, vectors[0], model);
+    const provider = embeddingProvider();
+    const text = [item.court, item.summary, item.thesis, item.outcome]
+      .filter(Boolean)
+      .join('\n');
+    
+    const { vectors, model } = await provider.embed([text]);
+    if (vectors[0]) {
+      await setJurisprudenceEmbedding(item.id, vectors[0], model);
+    }
+  } catch (error) {
+    console.error(`Erro ao embedar jurisprudência ${id}:`, error);
+    // Não falha a operação - o documento fica sem embedding mas ainda é pesquisável por lexical
+  }
 }
 
 export async function searchJurisprudence(
   organizationId: string,
   params: JurisprudenceSearch,
 ): Promise<JurisprudenceHit[]> {
+  const officialResults = await searchDatajudOfficial(params.q, params.limit, params.court);
+  if (officialResults.length > 0) {
+    return officialResults.slice(0, params.limit).map((item) => ({
+      id: item.id,
+      court: item.court,
+      judgingBody: item.judgingBody,
+      caseNumber: item.caseNumber,
+      judgmentDate: item.judgmentDate,
+      reporter: item.reporter,
+      summary: item.summary,
+      thesis: item.thesis,
+      outcome: item.outcome,
+      excerpt: item.excerpt,
+      sourceUrl: item.sourceUrl,
+      sourceName: item.sourceName,
+      verified: item.verified,
+      isDemo: item.isDemo,
+      score: 1,
+    }));
+  }
+
   const provider = embeddingProvider();
 
   let vectorHits: { id: string; score: number }[] = [];
+  
   try {
-    const { vectors } = await provider.embed([params.q]);
-    if (vectors[0]) {
-      vectorHits = await searchJurisprudenceByVector(organizationId, vectors[0], params.limit * 3);
+    // Tenta busca vetorial com timeout
+    const timeoutPromise = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout na busca vetorial')), 5000)
+    );
+    
+    const vectorPromise = provider.embed([params.q]);
+    const { vectors } = await Promise.race([vectorPromise, timeoutPromise]) as any;
+    
+    if (vectors?.[0]) {
+      vectorHits = await searchJurisprudenceByVector(
+        organizationId,
+        vectors[0],
+        params.limit * 3
+      ).catch((err) => {
+        console.warn('Falha na busca vetorial:', err.message);
+        return [];
+      });
     }
-  } catch {
-    // Sem busca vetorial disponível, seguimos apenas com o ranqueamento lexical.
+  } catch (error) {
+    // Log mas não falha
+    console.warn('Erro ao executar busca vetorial:', error);
   }
 
-  const candidates = await prisma.jurisprudence.findMany({
-    where: {
-      OR: [{ organizationId }, { organizationId: null }],
-      ...(params.court ? { court: { contains: params.court, mode: 'insensitive' } } : {}),
-    },
-    take: 500,
-  });
+  // Busca lexical é SEMPRE executada como fallback
+  const candidates = filterOfficialJurisprudenceRecords(
+    await prisma.jurisprudence.findMany({
+      where: {
+        OR: [
+          { organizationId },
+          { organizationId: null }, // Jurisprudência compartilhada
+        ],
+        ...(params.court
+          ? { court: { contains: params.court, mode: 'insensitive' } }
+          : {}),
+      },
+      take: 500,
+    }),
+  );
 
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) {
+    return [];
+  }
 
+  // Ranking combinado
   const scoreById = new Map(vectorHits.map((h) => [h.id, Number(h.score)]));
+  
   const lexical = rankDocuments(
-    candidates.map((c) => `${c.court} ${c.summary} ${c.thesis ?? ''} ${c.outcome ?? ''}`),
+    candidates.map(
+      (c) =>
+        `${c.court} ${c.summary} ${c.thesis ?? ''} ${c.outcome ?? ''} ${c.caseNumber}`
+    ),
     tokenize(params.q),
   );
+
   const maxLexical = Math.max(...lexical.map((l) => l.score), 1);
 
   const combined = candidates.map((item, index) => {
     const lexicalEntry = lexical.find((l) => l.index === index);
     const lexicalScore = (lexicalEntry?.score ?? 0) / maxLexical;
     const vectorScore = scoreById.get(item.id) ?? 0;
+    
+    // Ponderação: 40% vetorial + 60% lexical (lexical é mais confiável)
+    const finalScore = vectorScore * 0.4 + lexicalScore * 0.6;
+
     return {
       id: item.id,
       court: item.court,
@@ -127,26 +225,33 @@ export async function searchJurisprudence(
       sourceName: item.sourceName,
       verified: item.verified,
       isDemo: item.isDemo,
-      score: vectorScore * 0.6 + lexicalScore * 0.4,
+      score: finalScore,
     };
   });
 
   return combined
-    .filter((item) => item.score > 0.01)
+    .filter((item) => item.score > 0.05) // Threshold mínimo
     .sort((a, b) => b.score - a.score)
     .slice(0, params.limit);
 }
 
 export async function listJurisprudence(organizationId: string, limit = 50) {
-  return prisma.jurisprudence.findMany({
+  const rows = await prisma.jurisprudence.findMany({
     where: { OR: [{ organizationId }, { organizationId: null }] },
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
+
+  return filterOfficialJurisprudenceRecords(rows);
 }
 
 export async function deleteJurisprudence(organizationId: string, id: string) {
-  const item = await prisma.jurisprudence.findFirst({ where: { id, organizationId } });
-  if (!item) throw new NotFoundError('Registro não encontrado ou pertence ao acervo compartilhado.');
-  await prisma.jurisprudence.delete({ where: { id } });
+  const item = await prisma.jurisprudence.findFirst({
+    where: { id, organizationId },
+  });
+  if (!item) {
+    throw new NotFoundError('Registro não encontrado ou pertence ao acervo compartilhado.');
+  }
+
+  return prisma.jurisprudence.delete({ where: { id } });
 }

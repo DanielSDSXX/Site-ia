@@ -1,13 +1,14 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
-import { Avatar, Card, ErrorNotice, InfoNotice, Table, Td, Th } from '@/components/ui';
+import { useEffect, useState } from 'react';
+import { Avatar, Card, ErrorNotice, Table, Td, Th, Button } from '@/components/ui';
 import { apiDelete, apiPatch } from '@/lib/client/api-client';
 import { relativeTime } from '@/lib/utils';
 import { ROLE_LABELS } from '@/lib/auth/permissions';
 import type { Role } from '@prisma/client';
 import type { MemberRow } from './page';
+import { InviteForm } from './invite-form';
 
 export function TeamManager({
   members,
@@ -20,6 +21,12 @@ export function TeamManager({
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const changeRole = async (membershipId: string, role: string) => {
     setError(null);
@@ -45,6 +52,18 @@ export function TeamManager({
   return (
     <div className="space-y-4">
       {error && <ErrorNotice>{error}</ErrorNotice>}
+
+      {canManage && (
+        <div className="flex justify-end">
+          {showInviteForm ? (
+            <InviteForm onClose={() => setShowInviteForm(false)} />
+          ) : (
+            <Button onClick={() => setShowInviteForm(true)}>
+              + Convidar Membro
+            </Button>
+          )}
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         <Table>
@@ -94,7 +113,11 @@ export function TeamManager({
                   )}
                 </Td>
                 <Td className="text-[12.5px] text-[var(--text-muted)]">
-                  {member.user.lastLoginAt ? relativeTime(member.user.lastLoginAt) : 'Nunca acessou'}
+                  {member.user.lastLoginAt
+                    ? isHydrated
+                      ? relativeTime(member.user.lastLoginAt)
+                      : 'Recentemente'
+                    : 'Nunca acessou'}
                 </Td>
                 <Td>
                   {canManage && member.user.id !== currentUserId && (
@@ -114,14 +137,6 @@ export function TeamManager({
           </tbody>
         </Table>
       </Card>
-
-      <InfoNotice>
-        <strong>Convite por e-mail é uma integração futura.</strong> O modelo de dados já contempla
-        convites (tabela <code className="font-mono">invites</code>), mas o envio depende de um
-        provedor de e-mail configurado, o que ainda não faz parte desta instalação. Por enquanto,
-        novos integrantes criam a própria conta e são adicionados ao escritório por um administrador
-        diretamente no banco — o procedimento está em <code className="font-mono">docs/deploy.md</code>.
-      </InfoNotice>
     </div>
   );
 }

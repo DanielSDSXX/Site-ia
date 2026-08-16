@@ -21,6 +21,7 @@ export function JurisprudenceWorkspace({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState('');
+  const [court, setCourt] = useState('');
   const [results, setResults] = useState<Hit[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -28,16 +29,24 @@ export function JurisprudenceWorkspace({
 
   const search = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (query.trim().length < 3) {
+    const nextQuery = query.trim();
+    if (nextQuery.length === 0) {
       setResults(null);
+      setError('Informe um termo ou número do processo para pesquisar.');
+      return;
+    }
+    if (nextQuery.length < 3 && !/^\d{20}$/.test(nextQuery)) {
+      setResults(null);
+      setError('Use pelo menos 3 caracteres ou um número de processo CNJ de 20 dígitos.');
       return;
     }
     setLoading(true);
     setError(null);
 
-    const response = await apiGet<{ results: Hit[] }>(
-      `/api/jurisprudence?q=${encodeURIComponent(query.trim())}&limit=20`,
-    );
+    const params = new URLSearchParams({ q: nextQuery, limit: '20' });
+    if (court) params.set('court', court);
+
+    const response = await apiGet<{ results: Hit[] }>(`/api/jurisprudence?${params.toString()}`);
     setLoading(false);
 
     if (!response.ok) {
@@ -81,16 +90,38 @@ export function JurisprudenceWorkspace({
       {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <Card className="p-5">
-        <form onSubmit={search} className="flex gap-2">
+        <form onSubmit={search} className="flex flex-col gap-3 lg:flex-row">
           <div className="relative flex-1">
             <IconSearch className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--text-subtle)]" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Quero decisões sobre cobrança indevida em cartão de crédito com dano moral"
+              placeholder="00008323520184013202 ou cobrança indevida com dano moral"
               className="input pl-9"
             />
           </div>
+
+          <label className="min-w-[180px]">
+            <span className="sr-only">Tribunal</span>
+            <select
+              value={court}
+              onChange={(event) => setCourt(event.target.value)}
+              className="input"
+              aria-label="Tribunal"
+            >
+              <option value="">Todos os tribunais</option>
+              <option value="tjgo">TJGO</option>
+              <option value="tjsp">TJSP</option>
+              <option value="stj">STJ</option>
+              <option value="tst">TST</option>
+              <option value="tse">TSE</option>
+              <option value="trf1">TRF1</option>
+              <option value="trf2">TRF2</option>
+              <option value="trf3">TRF3</option>
+              <option value="trf4">TRF4</option>
+            </select>
+          </label>
+
           <Button type="submit" variant="primary" loading={loading}>
             Pesquisar
           </Button>
@@ -102,8 +133,7 @@ export function JurisprudenceWorkspace({
           )}
         </form>
         <p className="mt-2.5 text-[12px] text-[var(--text-subtle)]">
-          Busca semântica (embeddings) combinada com busca lexical (BM25) sobre o acervo do
-          escritório.
+          Busca oficial do Datajud por tribunal e número de processo, combinada com o acervo interno do escritório. A plataforma só aceita fontes com URL verificável.
         </p>
       </Card>
 
@@ -171,7 +201,7 @@ export function JurisprudenceWorkspace({
       {loading && (
         <p className="flex items-center gap-2 text-[13px] text-[var(--text-muted)]">
           <Spinner className="size-4" />
-          Consultando o acervo…
+          Consultando o acervo e, quando habilitado, a base oficial do Datajud…
         </p>
       )}
 
