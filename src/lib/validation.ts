@@ -220,6 +220,16 @@ export const jurisprudenceSearchSchema = z.object({
   q: z.string().trim().min(3, 'Descreva o que você procura.').max(500),
   court: z.string().trim().max(120).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(10),
+  /**
+   * Inclui na busca os registros marcados como demonstração. Desligado por
+   * padrão: o acervo de trabalho só devolve decisões com fonte oficial.
+   */
+  includeDemo: z
+    .union([z.boolean(), z.string()])
+    .transform((value) =>
+      typeof value === 'boolean' ? value : ['1', 'true', 'yes', 'on'].includes(value.toLowerCase()),
+    )
+    .default(false),
 });
 
 // ---------------------------------------------------------------------------

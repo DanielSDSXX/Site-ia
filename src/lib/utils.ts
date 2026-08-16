@@ -11,18 +11,42 @@ export function cn(...inputs: ClassValue[]) {
 
 const TZ = 'America/Sao_Paulo';
 
+/**
+ * Distingue data de calendário de instante no tempo.
+ *
+ * O domínio inteiro trata prazo, data de julgamento e data de ajuizamento como
+ * DATA, não como momento: o calculador de prazos monta tudo com
+ * `Date.UTC(ano, mês, dia)`, um `<input type="date">` é lido como meia-noite
+ * UTC e o DataJud devolve `dataAjuizamento` como `...T00:00:00.000Z`.
+ *
+ * Renderizar esses valores em America/Sao_Paulo (UTC−3) joga o relógio para as
+ * 21h do dia ANTERIOR — e o prazo de 04/09 aparecia como 03/09. Num produto de
+ * prazos processuais, errar um dia é errar o produto.
+ *
+ * Por isso: meia-noite UTC cravada é data de calendário e sai em UTC; qualquer
+ * outro horário é um instante real (uma movimentação às 14h32, por exemplo) e
+ * sai no fuso de Brasília.
+ */
+function isCalendarDate(d: Date): boolean {
+  return d.getTime() % 86_400_000 === 0;
+}
+
+function zoneFor(d: Date): string {
+  return isCalendarDate(d) ? 'UTC' : TZ;
+}
+
 export function formatDate(value: Date | string | null | undefined): string {
   if (!value) return '—';
   const d = typeof value === 'string' ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return '—';
-  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: TZ }).format(d);
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: zoneFor(d) }).format(d);
 }
 
 export function formatDateLong(value: Date | string | null | undefined): string {
   if (!value) return '—';
   const d = typeof value === 'string' ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return '—';
-  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long', timeZone: TZ }).format(d);
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long', timeZone: zoneFor(d) }).format(d);
 }
 
 export function formatDateTime(value: Date | string | null | undefined): string {
@@ -36,13 +60,33 @@ export function formatDateTime(value: Date | string | null | undefined): string 
   }).format(d);
 }
 
-/** Diferença em dias inteiros entre hoje e uma data (positivo = futuro). */
+/** Número do dia no calendário de um fuso, para subtrair dias sem erro de horário. */
+function calendarDayNumber(date: Date, timeZone: string): number {
+  // en-CA formata como YYYY-MM-DD, que é o que precisamos aqui.
+  const [year, month, day] = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .format(date)
+    .split('-')
+    .map(Number);
+  return Date.UTC(year, month - 1, day) / 86_400_000;
+}
+
+/**
+ * Diferença em dias inteiros entre hoje e uma data (positivo = futuro).
+ *
+ * Usava os componentes LOCAIS da data, o que dava duas respostas diferentes
+ * para o mesmo prazo: o servidor roda em UTC e o navegador do advogado, em
+ * Brasília. Agora "hoje" é sempre o dia em Brasília e a data-alvo é lida no
+ * fuso que corresponde à sua natureza (ver `zoneFor`).
+ */
 export function daysUntil(value: Date | string): number {
   const d = typeof value === 'string' ? new Date(value) : value;
-  const today = new Date();
-  const a = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-  const b = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-  return Math.round((a - b) / 86_400_000);
+  if (Number.isNaN(d.getTime())) return 0;
+  return calendarDayNumber(d, zoneFor(d)) - calendarDayNumber(new Date(), TZ);
 }
 
 export function relativeTime(value: Date | string | null | undefined): string {

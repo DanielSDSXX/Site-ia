@@ -4,7 +4,6 @@ import { embeddingProvider } from '@/lib/ai';
 import { searchJurisprudenceByVector, setJurisprudenceEmbedding } from '@/lib/rag/vector-store';
 import { rankDocuments, tokenize } from '@/lib/text/nlp';
 import { NotFoundError } from '@/lib/errors';
-import { searchDatajudOfficial } from '@/lib/jurisprudence/datajud';
 import type { jurisprudenceImportSchema, jurisprudenceSearchSchema } from '@/lib/validation';
 
 /**
@@ -116,31 +115,20 @@ export async function embedJurisprudence(id: string) {
   }
 }
 
+/**
+ * Busca no acervo de jurisprudência do escritório.
+ *
+ * NÃO consulta o DataJud. A API Pública do CNJ é fonte oficial de dados
+ * processuais e movimentações — ela não publica ementas, inteiro teor nem
+ * tese firmada. Encaixá-la aqui devolvia sempre zero resultado (todo registro
+ * caía no filtro por falta de ementa e de link) e ainda apagava o acervo
+ * local do caminho. A consulta ao DataJud vive em `src/server/datajud.ts`,
+ * onde ela faz o que a API realmente entrega.
+ */
 export async function searchJurisprudence(
   organizationId: string,
   params: JurisprudenceSearch,
 ): Promise<JurisprudenceHit[]> {
-  const officialResults = await searchDatajudOfficial(params.q, params.limit, params.court);
-  if (officialResults.length > 0) {
-    return officialResults.slice(0, params.limit).map((item) => ({
-      id: item.id,
-      court: item.court,
-      judgingBody: item.judgingBody,
-      caseNumber: item.caseNumber,
-      judgmentDate: item.judgmentDate,
-      reporter: item.reporter,
-      summary: item.summary,
-      thesis: item.thesis,
-      outcome: item.outcome,
-      excerpt: item.excerpt,
-      sourceUrl: item.sourceUrl,
-      sourceName: item.sourceName,
-      verified: item.verified,
-      isDemo: item.isDemo,
-      score: 1,
-    }));
-  }
-
   const provider = embeddingProvider();
 
   let vectorHits: { id: string; score: number }[] = [];
@@ -170,20 +158,22 @@ export async function searchJurisprudence(
   }
 
   // Busca lexical é SEMPRE executada como fallback
-  const candidates = filterOfficialJurisprudenceRecords(
-    await prisma.jurisprudence.findMany({
-      where: {
-        OR: [
-          { organizationId },
-          { organizationId: null }, // Jurisprudência compartilhada
-        ],
-        ...(params.court
-          ? { court: { contains: params.court, mode: 'insensitive' } }
-          : {}),
-      },
-      take: 500,
-    }),
-  );
+  const rows = await prisma.jurisprudence.findMany({
+    where: {
+      OR: [
+        { organizationId },
+        { organizationId: null }, // Jurisprudência compartilhada
+      ],
+      ...(params.court ? { court: { contains: params.court, mode: 'insensitive' } } : {}),
+    },
+    take: 500,
+  });
+
+  // Por padrão só entram decisões verificadas com fonte oficial. O acervo de
+  // demonstração fica atrás de um interruptor explícito para que uma instalação
+  // nova não pareça quebrada com zero resultados — e ele chega à interface
+  // marcado como fictício.
+  const candidates = params.includeDemo ? rows : filterOfficialJurisprudenceRecords(rows);
 
   if (candidates.length === 0) {
     return [];
@@ -235,14 +225,18 @@ export async function searchJurisprudence(
     .slice(0, params.limit);
 }
 
+/**
+ * Lista o acervo. Diferente da busca, aqui mostramos TUDO o que está gravado
+ * — inclusive os itens de demonstração —, porque esta é a tela de gestão do
+ * acervo: esconder registros faria o usuário achar que a importação falhou.
+ * A interface marca cada linha com a origem.
+ */
 export async function listJurisprudence(organizationId: string, limit = 50) {
-  const rows = await prisma.jurisprudence.findMany({
+  return prisma.jurisprudence.findMany({
     where: { OR: [{ organizationId }, { organizationId: null }] },
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
-
-  return filterOfficialJurisprudenceRecords(rows);
 }
 
 export async function deleteJurisprudence(organizationId: string, id: string) {

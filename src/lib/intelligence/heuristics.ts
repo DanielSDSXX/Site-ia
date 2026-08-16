@@ -935,53 +935,243 @@ export function heuristicNextActions(input: HeuristicInput): NextActionsOut {
 // Estrutura (partes, alegações, questões)
 // ---------------------------------------------------------------------------
 
-const PARTY_PATTERNS: [RegExp, 'PLAINTIFF' | 'DEFENDANT'][] = [
-  [/(?:autor(?:a)?|requerente|reclamante|exequente|impetrante)\s*:?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][^\n,;.]{3,80})/gi, 'PLAINTIFF'],
-  [/(?:r[ée]u|r[ée]|requerid[ao]|reclamad[ao]|executad[ao]|impetrad[ao])\s*:?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][^\n,;.]{3,80})/gi, 'DEFENDANT'],
+/*
+  Extração de partes a partir do texto da petição.
+
+  A versão anterior produzia lixo — "sponder", "gular", "quer-se", frases
+  inteiras viravam nome de parte — por três motivos que vale registrar, porque
+  são fáceis de reintroduzir:
+
+   1. a alternativa `r[ée]` casava o "re" de QUALQUER palavra (responder,
+      regular, restrição), e a captura começava no que sobrava: "sponder";
+   2. a flag `i` anulava a exigência de inicial maiúscula do `[A-ZÁÀÂ…]`, então
+      texto corrido em minúscula passava por nome;
+   3. a captura era `[^\n,;.]{3,80}` — ou seja, até 80 caracteres de prosa, não
+      algo com forma de nome.
+
+  Agora o casamento é em duas etapas: primeiro localiza-se o termo do polo com
+  fronteira de palavra (`\b`), depois exige-se, logo em seguida, algo com FORMA
+  de nome próprio — tokens iniciados por maiúscula, ligados por partículas
+  ("da", "de", "dos"). Nome de parte é dado que vai para a ficha do processo;
+  é melhor não extrair nenhum do que extrair um pedaço de frase.
+*/
+
+const NAME_TOKEN = "[A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][A-Za-zÁÀÂÃÉÊÍÓÔÕÚÜÇáàâãéêíóôõúüç&.'-]+";
+const CONNECTOR = '(?:d[aeo]s?|e|em|von|van)';
+/** Pelo menos dois tokens: "Mariana Costa", "Banco Exemplo Fictício S.A." */
+const FULL_NAME = `${NAME_TOKEN}(?:\\s+(?:${CONNECTOR}\\s+)?${NAME_TOKEN}){1,7}`;
+const NAME_AT_START = new RegExp(`^${FULL_NAME}`);
+
+const ROLE_TERMS: [RegExp, 'PLAINTIFF' | 'DEFENDANT'][] = [
+  [
+    /\b(?:autor(?:a|es|as)?|requerentes?|reclamantes?|exequentes?|impetrantes?|demandantes?)\b\s*:?\s*/gi,
+    'PLAINTIFF',
+  ],
+  [
+    /\b(?:r[ée]us?|r[ée]s|requerid[ao]s?|reclamad[ao]s?|executad[ao]s?|impetrad[ao]s?|demandad[ao]s?)\b\s*:?\s*/gi,
+    'DEFENDANT',
+  ],
 ];
+
+/**
+ * Termos que têm forma de nome próprio mas não são parte.
+ * Sem isto, "Vossa Excelência" e "Vara Cível" entram na ficha como réu.
+ */
+const NOT_A_PARTY = [
+  'vossa excelencia',
+  'meritissimo',
+  'excelentissimo',
+  'juizo de direito',
+  'vara civel',
+  'comarca de',
+  'tribunal de justica',
+  'ministerio publico federal',
+  'codigo de defesa',
+  'codigo civil',
+];
+
+/**
+ * Remove pontuação final sem mutilar abreviação.
+ *
+ * "Mariana Costa Pereira." perde o ponto; "Banco Exemplo Fictício S.A." não —
+ * ali o ponto faz parte do nome, e "S.A" seria um nome errado na ficha.
+ */
+function stripTrailingPunctuation(name: string): string {
+  let out = name.replace(/[,;]+$/, '');
+  const lastWord = out.split(/\s+/).pop() ?? '';
+  // Um ponto interno (S.A., Cia.Ltda.) indica abreviação: o final fica.
+  if (out.endsWith('.') && !lastWord.slice(0, -1).includes('.')) {
+    out = out.slice(0, -1);
+  }
+  return out.trim();
+}
+
+/** Preposições e artigos: nome de parte não começa por eles. */
+const LEADING_STOPWORDS = new Set([
+  'de', 'da', 'do', 'das', 'dos', 'e', 'em', 'com', 'por', 'para',
+  'a', 'o', 'as', 'os', 'ao', 'aos', 'no', 'na', 'nos', 'nas',
+]);
+
+/**
+ * Recorta o nome de dentro do trecho casado.
+ *
+ * `NAME_TOKEN` aceita ponto interno — precisa, senão "S.A." se parte em dois —
+ * e o efeito colateral é que o casamento atravessa fim de frase:
+ * "…VARA CÍVEL. MARIANA COSTA PEREIRA" vinha inteiro. Aqui cortamos na quebra
+ * de frase e descartamos preposições iniciais.
+ */
+function trimToName(raw: string): string {
+  const normalizedSpaces = raw.trim().replace(/\s+/g, ' ');
+
+  // Só quebra depois de uma palavra de verdade: o lookbehind de 3 letras evita
+  // partir abreviações como "S.A." ou iniciais como "J. Silva".
+  const segments = normalizedSpaces.split(
+    /(?<=[A-Za-zÁÀÂÃÉÊÍÓÔÕÚÜÇáàâãéêíóôõúüç]{3})\.\s+(?=[A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ])/,
+  );
+  const tokens = segments[segments.length - 1].split(' ');
+
+  while (tokens.length > 0 && LEADING_STOPWORDS.has(normalizeText(tokens[0]))) tokens.shift();
+  return stripTrailingPunctuation(tokens.join(' '));
+}
+
+function looksLikeParty(name: string): boolean {
+  if (name.length < 6 || name.length > 120) return false;
+  // Nome de parte tem ao menos dois tokens: "Banco" sozinho não é ninguém.
+  if (name.split(' ').length < 2) return false;
+
+  const normalized = normalizeText(name);
+  if (NOT_A_PARTY.some((term) => normalized.startsWith(term) || normalized === term)) return false;
+
+  // "DE DÉBITO CUMULADA COM…" tem forma de nome em caixa alta, mas começa por
+  // preposição: é pedaço do nome de uma ação, não uma parte.
+  const firstToken = normalized.split(/\s+/)[0] ?? '';
+  return !LEADING_STOPWORDS.has(firstToken);
+}
+
+/** Extrai o nome próprio que vem logo depois do termo do polo, se houver. */
+function nameAfter(content: string, from: number): string | null {
+  const match = content.slice(from).match(NAME_AT_START);
+  if (!match) return null;
+  const name = trimToName(match[0]);
+  return looksLikeParty(name) ? name : null;
+}
 
 export function heuristicStructure(input: HeuristicInput): StructureOut {
   const parties: StructureOut['parties'] = [];
   const seenNames = new Set<string>();
 
+  const addParty = (
+    name: string,
+    role: 'PLAINTIFF' | 'DEFENDANT',
+    ref: StructureOut['parties'][number]['refs'][number],
+  ): boolean => {
+    const key = normalizeText(name);
+    if (seenNames.has(key)) return false;
+    seenNames.add(key);
+    parties.push({
+      name: name.slice(0, 200),
+      role,
+      side: role === 'PLAINTIFF' ? 'OURS' : 'OPPOSING',
+      refs: [ref],
+    });
+    return true;
+  };
+
   for (const block of input.context.blocks) {
-    for (const [pattern, role] of PARTY_PATTERNS) {
+    if (parties.length >= 12) break;
+    for (const [pattern, role] of ROLE_TERMS) {
       for (const match of block.chunk.content.matchAll(pattern)) {
-        const name = match[1]?.trim().replace(/\s+/g, ' ');
-        if (!name || name.length < 4) continue;
-        const key = normalizeText(name);
-        if (seenNames.has(key)) continue;
-        seenNames.add(key);
-        parties.push({
-          name: name.slice(0, 200),
-          role,
-          side: role === 'PLAINTIFF' ? 'OURS' : 'OPPOSING',
-          refs: [block.ref],
-        });
+        const name = nameAfter(block.chunk.content, (match.index ?? 0) + match[0].length);
+        if (!name) continue;
+        addParty(name, role, block.ref);
         if (parties.length >= 12) break;
       }
     }
   }
 
-  // "X em face de Y" / "X contra Y"
+  /*
+    Abertura qualificada — a forma como a peça apresenta quem a assina:
+
+      "MARIANA COSTA PEREIRA, brasileira, analista administrativa, portadora…"
+      "BANCO EXEMPLO FICTÍCIO S.A., já qualificado nos autos, vem apresentar…"
+
+    O nome vem antes da vírgula, seguido da qualificação. O polo sai do tipo da
+    peça: quem abre a inicial é o autor; quem abre a contestação é o réu. Só a
+    PRIMEIRA ocorrência de cada peça conta — as seguintes costumam ser
+    testemunhas, advogados ou terceiros.
+  */
+  /*
+    Sem a flag `i`: ela anula a exigência de inicial maiúscula do FULL_NAME e
+    faz o casamento atravessar texto em minúscula — foi assim que "Mariana
+    Costa Pereira em face de Banco…" virou um nome só. As palavras-chave
+    ganham tolerância de caixa uma a uma, no lugar da flag.
+  */
+  const QUALIFICATION =
+    '(?:[Bb]rasileir[ao]|[Pp]ortador[a]?|[Ii]nscrit[ao]|[Jj][áa] qualificad[ao]|[Pp]essoa jur[íi]dica|[Ss]ociedade|[Rr]esidente|[Dd]omiciliad[ao])';
+  const QUALIFIED_OPENING = new RegExp(`(${FULL_NAME})\\s*,\\s*${QUALIFICATION}`);
+
   for (const block of input.context.blocks) {
-    const match = block.chunk.content.match(
-      /([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][\w\sÁÀÂÃÉÊÍÓÔÕÚÇç.&-]{4,70})\s+(?:em face de|contra|x)\s+([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][\w\sÁÀÂÃÉÊÍÓÔÕÚÇç.&-]{4,70})/,
-    );
-    if (match) {
-      for (const [index, raw] of [match[1], match[2]].entries()) {
-        const name = raw.trim().replace(/\s+/g, ' ');
-        const key = normalizeText(name);
-        if (seenNames.has(key)) continue;
-        seenNames.add(key);
-        parties.push({
-          name: name.slice(0, 200),
-          role: index === 0 ? 'PLAINTIFF' : 'DEFENDANT',
-          side: index === 0 ? 'OURS' : 'OPPOSING',
-          refs: [block.ref],
-        });
+    if (parties.length >= 12) break;
+    const match = block.chunk.content.match(QUALIFIED_OPENING);
+    if (!match) continue;
+
+    const name = trimToName(match[1]);
+    if (!looksLikeParty(name)) continue;
+
+    const role = block.chunk.documentKind === 'ANSWER' ? 'DEFENDANT' : 'PLAINTIFF';
+    addParty(name, role, block.ref);
+  }
+
+  // "ação proposta/ajuizada/movida por X" — o autor, dito explicitamente.
+  const FILED_BY = new RegExp(
+    `\\b(?:[Pp]roposta|[Aa]juizada|[Mm]ovida|[Ii]ntentada)\\s+[Pp]or\\s+(${FULL_NAME})`,
+  );
+  for (const block of input.context.blocks) {
+    if (parties.length >= 12) break;
+    const match = block.chunk.content.match(FILED_BY);
+    if (!match) continue;
+
+    const name = trimToName(match[1]);
+    if (looksLikeParty(name)) addParty(name, 'PLAINTIFF', block.ref);
+  }
+
+  /*
+    A autuação: "... em face de Y".
+
+    O que vem DEPOIS de "em face de" é o réu, com folga de confiança. O que vem
+    ANTES normalmente não é o autor — é o nome da ação:
+
+      "...vem propor AÇÃO DECLARATÓRIA DE INEXISTÊNCIA DE DÉBITO
+       CUMULADA COM INDENIZAÇÃO POR DANOS MORAIS em face de BANCO X"
+
+    Ler aquilo como autor foi exatamente o que cadastrou "DE DÉBITO CUMULADA
+    COM INDENIZAÇÃO POR DANOS MORAIS" como parte. Por isso só aceitamos o autor
+    daqui quando há um "por" explícito ligando ("ação proposta por Fulano em
+    face de Beltrano"); fora esse caso, o autor vem do termo do polo.
+  */
+  const CAPTION_BY = new RegExp(`\\bpor\\s+(${FULL_NAME})\\s+(?:em face de|contra)\\s+(${FULL_NAME})`);
+  const CAPTION_AGAINST = new RegExp(`(?:em face de|contra)\\s+(${FULL_NAME})`);
+
+  for (const block of input.context.blocks) {
+    const content = block.chunk.content;
+
+    const byMatch = content.match(CAPTION_BY);
+    if (byMatch) {
+      for (const [index, raw] of [byMatch[1], byMatch[2]].entries()) {
+        const name = trimToName(raw);
+        if (!looksLikeParty(name)) continue;
+        addParty(name, index === 0 ? 'PLAINTIFF' : 'DEFENDANT', block.ref);
       }
       break;
+    }
+
+    const againstMatch = content.match(CAPTION_AGAINST);
+    if (againstMatch) {
+      const name = trimToName(againstMatch[1]);
+      if (looksLikeParty(name)) {
+        addParty(name, 'DEFENDANT', block.ref);
+        break;
+      }
     }
   }
 

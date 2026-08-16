@@ -6,6 +6,8 @@ import {
   slugify,
   formatBytes,
   daysUntil,
+  formatDate,
+  formatDateTime,
 } from '@/lib/utils';
 
 describe('número CNJ', () => {
@@ -72,5 +74,45 @@ describe('daysUntil', () => {
     const past = new Date();
     past.setDate(past.getDate() - 2);
     expect(daysUntil(past)).toBe(-2);
+  });
+
+  it('não perde um dia em datas de calendário (meia-noite UTC)', () => {
+    // O calculador de prazos grava com Date.UTC(ano, mês, dia). Lido com os
+    // componentes locais em Brasília, isso virava o dia anterior.
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+
+    expect(daysUntil(new Date(`${today}T00:00:00.000Z`))).toBe(0);
+  });
+});
+
+describe('formatação de datas', () => {
+  /*
+    Data de calendário e instante no tempo são coisas diferentes.
+
+    Um prazo é um DIA — e num fuso a oeste de Greenwich, renderizar a
+    meia-noite UTC no relógio de Brasília o joga para as 21h do dia anterior.
+    Era assim que o prazo de 04/09 aparecia como 03/09.
+  */
+  it('mostra o prazo no dia certo, sem recuar pelo fuso', () => {
+    expect(formatDate('2026-09-04T00:00:00.000Z')).toBe('04/09/2026');
+    expect(formatDate('2026-02-11T00:00:00.000Z')).toBe('11/02/2026');
+    expect(formatDate('2026-01-01T00:00:00.000Z')).toBe('01/01/2026');
+  });
+
+  it('mantém instantes reais no fuso de Brasília', () => {
+    // Movimentação às 09:12 UTC ocorreu às 06:12 em Brasília.
+    expect(formatDateTime('2026-07-30T09:12:00.000Z')).toBe('30/07/2026, 06:12');
+    // E às 00:30 UTC ainda era o dia anterior aqui.
+    expect(formatDate('2026-07-30T00:30:00.000Z')).toBe('29/07/2026');
+  });
+
+  it('devolve travessão para valor ausente ou inválido', () => {
+    expect(formatDate(null)).toBe('—');
+    expect(formatDate('não é data')).toBe('—');
   });
 });

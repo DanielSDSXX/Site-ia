@@ -803,6 +803,24 @@ async function applySideEffects(
 
     if (type === 'STRUCTURE_EXTRACTION') {
       const parties = (payload.parties as { name: string; role: string; side: string }[]) ?? [];
+
+      /*
+        Reanalisar substitui o que a extração tinha achado antes, senão cada
+        execução empilha partes e a ficha do processo vira um depósito.
+
+        Mas só apagamos o que veio da extração: se alguém preencheu CPF/CNPJ,
+        advogado ou anotação naquela parte, o registro é trabalho humano e
+        permanece. Perder isso seria pior do que uma duplicata.
+      */
+      await prisma.party.deleteMany({
+        where: {
+          processId,
+          documentId: null,
+          lawyerName: null,
+          notes: null,
+        },
+      });
+
       for (const party of parties) {
         const existing = await prisma.party.findFirst({
           where: { processId, name: { equals: party.name, mode: 'insensitive' } },

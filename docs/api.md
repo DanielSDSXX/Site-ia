@@ -205,9 +205,93 @@ A `note` sempre declara as limitações do cálculo.
 ### `GET /api/jurisprudence`
 Sem `q`: lista o acervo. Com `q`: busca híbrida (embedding + BM25) e devolve `score`.
 
+Por padrão a busca considera apenas decisões com fonte oficial. `includeDemo=true`
+inclui também os exemplos fictícios do seed, que vêm marcados com `isDemo: true` e
+aparecem na interface com o selo **Fictícia — demonstração**.
+
 ### `POST /api/jurisprudence`
 `sourceUrl` e `sourceName` são **obrigatórios**. Decisão sem fonte verificável não entra
 no acervo — é a regra que impede a plataforma de apresentar julgados não conferíveis.
+
+---
+
+## Consulta processual — CNJ DataJud
+
+Fonte **oficial** do Conselho Nacional de Justiça para dados processuais. Fica separada
+da jurisprudência por um motivo concreto: a API Pública do DataJud publica número,
+classe, assuntos, órgão julgador, grau, nível de sigilo e **movimentações** — e não
+publica ementa, inteiro teor, relator nem tese. Ela responde "o que aconteceu neste
+processo", não "quais decisões existem sobre este tema". Tratar um andamento como
+precedente seria um erro caro, então as duas fontes não se misturam em lista nenhuma.
+
+### O que o CNJ não entrega — e como a plataforma lida
+
+Duas informações que os usuários pedem **não existem** nesta API. Em vez de inventá-las,
+a plataforma é explícita sobre a origem de cada uma:
+
+| Informação | Origem real | Como aparece |
+| --- | --- | --- |
+| Situação (ativo/suspenso/arquivado) | Não existe campo na API | Deduzida da última movimentação decisiva, com `inferred: true` e `basis` apontando o andamento que a sustenta. Sem movimentação conclusiva, `INDEFINIDO` — nunca "ativo" por omissão. |
+| Nome das partes | Não publicado pelo CNJ | Vem do cadastro do próprio escritório (`local.parties`), quando o número CNJ bate. A tela diz de onde veio e avisa quando não há cadastro. |
+
+Regras de dedução (`src/lib/integrations/datajud/situation.ts`), avaliadas da movimentação
+mais recente para a mais antiga: desarquivamento e levantamento de suspensão reativam;
+baixa definitiva encerra; arquivamento arquiva; suspensão/sobrestamento suspendem. A ordem
+importa — "desarquivamento" contém "arquivamento".
+
+**Segredo de justiça:** `nivelSigilo > 0` gera aviso destacado na ficha, alertando que os
+dados podem vir incompletos e que o conteúdo não deve ser compartilhado fora dos autos.
+
+Requer `DATAJUD_ENABLED=true` e `DATAJUD_API_KEY` (chave pública divulgada pelo CNJ).
+Desativada, a API responde normalmente com `enabled: false` e o motivo — a tela mostra
+o que configurar em vez de fingir que não há resultados.
+
+### `GET /api/datajud`
+Sem `q`: devolve `{ status, courts }` — estado da integração e os 37 índices do CNJ,
+usado pela tela para se montar.
+
+Com `q`: consulta o índice do tribunal escolhido.
+
+O parâmetro `court` é opcional: com o número CNJ completo, o tribunal é deduzido dos
+próprios dígitos (segmento `J` e tribunal `TR`), cobrindo Justiça Federal e Estadual.
+Quando não dá para afirmar, a escolha volta para o usuário em vez de cair num índice
+qualquer e responder "não encontrado" pelo motivo errado.
+
+```
+GET /api/datajud?q=0000832-35.2018.4.01.3202
+→ { "enabled": true, "index": "api_publica_trf1", "total": 1,
+    "processes": [ {
+      "caseNumber": "0000832-35.2018.4.01.3202",
+      "secrecy": { "level": 0, "isSecret": false, "label": "Público" },
+      "situation": { "code": "ATIVO", "label": "Em curso", "inferred": true,
+                     "basis": { "name": "Citação", "occurredAt": "…" } },
+      "local": { "id": "…", "parties": [ { "name": "…", "role": "Autor", "side": "OURS" } ] },
+      "movements": [ … ]
+    } ], "error": null }
+```
+
+Falhas de rede ou do Elasticsearch voltam em `error` com texto legível, nunca como
+lista vazia — o usuário precisa distinguir "não existe processo" de "a integração caiu".
+
+### `POST /api/datajud`
+Importa as movimentações do processo para a linha do tempo. Exige `process:write`.
+
+```json
+{ "processId": "…", "caseNumber": "00008323520184013202", "court": "api_publica_trf1" }
+→ { "imported": 34, "skipped": 2, "statusChanged": "ARCHIVED",
+    "caseNumber": "…", "index": "…", "situation": "Arquivado" }
+```
+
+Os eventos entram com `isInferred: false` — são registro oficial do tribunal, não
+dedução da análise. A reimportação não duplica: movimentos com mesma data e mesmo
+título são ignorados. A ação é auditada com `metadata.source = "datajud"`.
+
+`statusChanged` só vem preenchido quando a situação lida é **conclusiva** (arquivamento,
+baixa, suspensão). "Em curso" por ausência de sinal contrário não sobrescreve o que o
+escritório anotou no cadastro.
+
+Diagnóstico fora da aplicação: `node scripts/datajud-doctor.mjs tjsp "execução fiscal"`
+imprime a requisição e a resposta bruta do CNJ.
 
 ### `/api/memory` — GET, POST, PATCH (ativar/desativar), DELETE
 Memória do Escritório. Itens são indexados para busca semântica e usados apenas como

@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Badge, Button, Card, EmptyState, ErrorNotice, Spinner } from '@/components/ui';
+import { Badge, Button, Card, EmptyState, ErrorNotice, InfoNotice, Spinner } from '@/components/ui';
 import { apiGet, apiPost } from '@/lib/client/api-client';
 import { formatDate } from '@/lib/utils';
 import { IconExternal, IconPlus, IconScale, IconSearch } from '@/components/icons';
@@ -26,6 +26,11 @@ export function JurisprudenceWorkspace({
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [includeDemo, setIncludeDemo] = useState(false);
+
+  const availableCourts = [...new Set(items.map((item) => item.court))].sort();
+  const demoCount = items.filter((item) => item.isDemo).length;
+  const officialCount = items.length - demoCount;
 
   const search = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -45,6 +50,7 @@ export function JurisprudenceWorkspace({
 
     const params = new URLSearchParams({ q: nextQuery, limit: '20' });
     if (court) params.set('court', court);
+    if (includeDemo) params.set('includeDemo', 'true');
 
     const response = await apiGet<{ results: Hit[] }>(`/api/jurisprudence?${params.toString()}`);
     setLoading(false);
@@ -101,6 +107,11 @@ export function JurisprudenceWorkspace({
             />
           </div>
 
+          {/*
+            Os tribunais vêm do próprio acervo. Uma lista fixa ofereceria
+            filtros que não retornam nada, porque só é pesquisável o que foi
+            importado.
+          */}
           <label className="min-w-[180px]">
             <span className="sr-only">Tribunal</span>
             <select
@@ -109,16 +120,12 @@ export function JurisprudenceWorkspace({
               className="input"
               aria-label="Tribunal"
             >
-              <option value="">Todos os tribunais</option>
-              <option value="tjgo">TJGO</option>
-              <option value="tjsp">TJSP</option>
-              <option value="stj">STJ</option>
-              <option value="tst">TST</option>
-              <option value="tse">TSE</option>
-              <option value="trf1">TRF1</option>
-              <option value="trf2">TRF2</option>
-              <option value="trf3">TRF3</option>
-              <option value="trf4">TRF4</option>
+              <option value="">Todos os tribunais do acervo</option>
+              {availableCourts.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -132,10 +139,36 @@ export function JurisprudenceWorkspace({
             </Button>
           )}
         </form>
-        <p className="mt-2.5 text-[12px] text-[var(--text-subtle)]">
-          Busca oficial do Datajud por tribunal e número de processo, combinada com o acervo interno do escritório. A plataforma só aceita fontes com URL verificável.
-        </p>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[12px] leading-relaxed text-[var(--text-subtle)]">
+            Busca semântica (embeddings) combinada com BM25 sobre as {officialCount} decisão(ões)
+            com fonte oficial no acervo. Para dados processuais e movimentações, use a aba{' '}
+            <strong>Consulta processual — CNJ DataJud</strong>.
+          </p>
+
+          {demoCount > 0 && (
+            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[12px] text-[var(--text-muted)]">
+              <input
+                type="checkbox"
+                checked={includeDemo}
+                onChange={(event) => setIncludeDemo(event.target.checked)}
+                className="size-3.5 accent-[var(--accent)]"
+              />
+              Incluir os {demoCount} exemplo(s) de demonstração
+            </label>
+          )}
+        </div>
       </Card>
+
+      {officialCount === 0 && (
+        <InfoNotice>
+          <strong>O acervo ainda não tem nenhuma decisão com fonte oficial.</strong> Enquanto isso, a
+          busca não devolve resultados — por decisão de produto, a plataforma não inventa
+          jurisprudência para preencher a tela. Use o botão <strong>Importar</strong> para cadastrar
+          uma ementa com a URL do tribunal
+          {demoCount > 0 ? ', ou marque a caixa acima para pesquisar nos exemplos fictícios.' : '.'}
+        </InfoNotice>
+      )}
 
       {showForm && canWrite && (
         <Card className="p-5">
