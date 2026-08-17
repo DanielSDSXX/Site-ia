@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { deriveSituation, indexFromCaseNumber, readSecrecy } from '@/lib/integrations/datajud';
+import {
+  describeHttpError,
+  deriveSituation,
+  indexFromCaseNumber,
+  looksLikeCnjResponse,
+  readSecrecy,
+} from '@/lib/integrations/datajud';
 import type { DatajudMovement } from '@/lib/integrations/datajud';
 
 /**
@@ -118,5 +124,45 @@ describe('tribunal deduzido do número CNJ', () => {
     // J=5 (trabalhista) não está coberto: melhor deixar o usuário escolher.
     expect(indexFromCaseNumber('08012345620265090051')).toBeNull();
     expect(indexFromCaseNumber('123')).toBeNull();
+  });
+});
+
+describe('mensagens de erro da consulta', () => {
+  /*
+    Um 403 do proxy da rede exibido como "a chave foi recusada" faz o usuário
+    trocar uma chave que está correta. Aconteceu de verdade ao testar com a
+    chave pública do CNJ atrás de um proxy que bloqueava o host.
+  */
+  it('distingue bloqueio de rede de recusa da chave', () => {
+    const proxy = describeHttpError(
+      403,
+      'api_publica_tjgo',
+      'Host not in allowlist: api-publica.datajud.cnj.jus.br. Add this host to your network egress settings.',
+    );
+
+    expect(proxy).toContain('não veio do CNJ');
+    expect(proxy).toContain('proxy');
+    expect(proxy).not.toContain('DATAJUD_API_KEY');
+  });
+
+  it('mantém a orientação sobre a chave quando o CNJ é quem recusa', () => {
+    const cnj = describeHttpError(
+      403,
+      'api_publica_tjgo',
+      '{"error":{"type":"security_exception","reason":"unable to authenticate"}}',
+    );
+
+    expect(cnj).toContain('DATAJUD_API_KEY');
+    expect(cnj).not.toContain('proxy');
+  });
+
+  it('sem corpo, não acusa a rede sem base', () => {
+    expect(looksLikeCnjResponse('')).toBe(true);
+    expect(describeHttpError(403, 'api_publica_tjgo', '')).toContain('DATAJUD_API_KEY');
+  });
+
+  it('reconhece o índice inexistente e o excesso de requisições', () => {
+    expect(describeHttpError(404, 'api_publica_xxxx', '{"error":{}}')).toContain('api_publica_xxxx');
+    expect(describeHttpError(429, 'api_publica_tjgo', '{"error":{}}')).toContain('Limite');
   });
 });

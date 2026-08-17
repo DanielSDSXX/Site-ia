@@ -29,10 +29,21 @@ async function request<T>(url: string, init: RequestInit): Promise<ApiResult<T>>
     const payload = await response.json().catch(() => null);
 
     if (!response.ok) {
-      const message =
-        (payload as { error?: { message?: string; code?: string } } | null)?.error?.message ?? GENERIC;
-      const code = (payload as { error?: { code?: string } } | null)?.error?.code;
-      return { ok: false, message, code };
+      const error = (payload as { error?: { message?: string; code?: string; details?: unknown } } | null)
+        ?.error;
+      const base = error?.message ?? GENERIC;
+
+      /*
+        Em desenvolvimento o servidor anexa a primeira linha do erro real em
+        `details` (ver src/lib/errors.ts). Mostrá-la aqui evita a caça ao
+        terminal quando a tela diz apenas "não conseguimos concluir a
+        operação". Em produção esse campo não é enviado, então nada muda.
+      */
+      const hint = typeof error?.details === 'string' && error.details.startsWith('[dev] ')
+        ? ` ${error.details}`
+        : '';
+
+      return { ok: false, message: `${base}${hint}`, code: error?.code };
     }
 
     return { ok: true, data: payload as T };

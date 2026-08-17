@@ -21,7 +21,14 @@
  * Documentação: https://datajud-wiki.cnj.jus.br/api-publica/
  */
 
-export { DATAJUD_DEFAULT_BASE_URL, datajudEnabled, datajudStatus, searchDatajudProcesses } from './client';
+export {
+  DATAJUD_DEFAULT_BASE_URL,
+  datajudEnabled,
+  datajudStatus,
+  describeHttpError,
+  looksLikeCnjResponse,
+  searchDatajudProcesses,
+} from './client';
 export { DATAJUD_INDEXES, indexFromCaseNumber, indexToCourt, resolveDatajudIndex } from './indexes';
 export { maskCnj, normalizeDatajudProcess } from './normalize';
 export { buildDatajudSearchBody, toCnjDigits } from './query';

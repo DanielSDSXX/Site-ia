@@ -120,7 +120,42 @@ export async function searchDatajudProcesses(
   }
 }
 
-function describeHttpError(status: number, index: string, detail: string): string {
+/**
+ * A resposta parece ter vindo mesmo do CNJ?
+ *
+ * O Elasticsearch responde JSON em qualquer erro. Quando volta texto puro
+ * ("Host not in allowlist", "Access Denied", uma página de bloqueio), quem
+ * respondeu foi um proxy, firewall ou gateway no caminho — não o CNJ.
+ *
+ * A distinção importa: um 403 de proxy exibido como "a chave foi recusada"
+ * manda o usuário trocar uma chave que está correta, enquanto o problema real
+ * é liberação de rede.
+ */
+export function looksLikeCnjResponse(detail: string): boolean {
+  const body = detail.trim();
+  // Sem corpo não dá para afirmar interferência; assumimos o CNJ.
+  if (!body) return true;
+
+  /*
+    O critério é só este: o Elasticsearch responde JSON, sempre, inclusive nos
+    erros. Procurar palavras como "datajud" ou "cnj" no texto NÃO serve — a
+    mensagem do proxy cita o próprio host bloqueado
+    ("Host not in allowlist: api-publica.datajud.cnj.jus.br") e passaria por
+    resposta legítima.
+  */
+  return body.startsWith('{') || body.startsWith('[');
+}
+
+export function describeHttpError(status: number, index: string, detail: string): string {
+  if (!looksLikeCnjResponse(detail)) {
+    const excerpt = detail.trim().replace(/\s+/g, ' ').slice(0, 160);
+    return (
+      `A resposta não veio do CNJ (HTTP ${status}): alguém no caminho interceptou a chamada ` +
+      `— proxy, firewall ou política de saída da rede. Libere o acesso a ` +
+      `api-publica.datajud.cnj.jus.br. Resposta recebida: "${excerpt}"`
+    );
+  }
+
   if (status === 401 || status === 403) {
     return `O DataJud recusou a chave de API (HTTP ${status}). Confira DATAJUD_API_KEY.`;
   }

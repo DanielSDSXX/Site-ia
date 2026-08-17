@@ -27,6 +27,7 @@ export function startWorker(options: { concurrency?: number } = {}): WorkerHandl
 
   const loop = async (slot: number) => {
     let idle = IDLE_MIN_MS;
+    let failures = 0;
 
     while (running) {
       try {
@@ -36,6 +37,8 @@ export function startWorker(options: { concurrency?: number } = {}): WorkerHandl
         }
 
         const job = await claimNextJob(workerId);
+        failures = 0; // conseguimos falar com o banco
+
         if (!job) {
           await sleep(idle);
           idle = Math.min(IDLE_MAX_MS, Math.round(idle * 1.5));
@@ -58,8 +61,21 @@ export function startWorker(options: { concurrency?: number } = {}): WorkerHandl
           await failJob(job.id, err, job.attempts, job.maxAttempts);
         }
       } catch (err) {
-        logError('worker.loop', err, { slot });
-        await sleep(2000);
+        /*
+          Falha aqui é quase sempre o banco fora do ar. Antes, cada slot
+          registrava o stack inteiro a cada 2s: com o Postgres parado o
+          terminal virava um muro de texto e escondia o erro que o
+          desenvolvedor estava procurando.
+
+          Agora só o primeiro erro e depois um a cada dez, com espera
+          crescente até 30s. O worker continua tentando — quando o banco
+          voltar, `failures` zera e o ritmo normal é retomado.
+        */
+        failures++;
+        if (failures === 1 || failures % 10 === 0) {
+          logError('worker.loop', err, { slot, consecutiveFailures: failures });
+        }
+        await sleep(Math.min(30_000, 2000 * 2 ** Math.min(failures - 1, 4)));
       }
     }
   };

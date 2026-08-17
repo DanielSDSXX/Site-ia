@@ -80,6 +80,33 @@ export interface PublicErrorShape {
   error: { code: string; message: string; details?: unknown };
 }
 
+/**
+ * Detalhe técnico do erro — SOMENTE em desenvolvimento.
+ *
+ * Em produção o usuário nunca vê stack, nome de tabela ou host de banco: isso
+ * vaza infraestrutura e não ajuda ninguém. Mas em desenvolvimento a mensagem
+ * genérica esconde justamente o que o desenvolvedor precisa — "não
+ * conseguimos concluir a operação" pode ser banco fora do ar, migração
+ * pendente ou seed ausente, e não havia como distinguir sem ler o terminal.
+ */
+function developmentHint(err: unknown): string | null {
+  if (process.env.NODE_ENV === 'production') return null;
+  const message = err instanceof Error ? err.message : String(err);
+  const lines = message
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  /*
+    A primeira linha costuma ser só cabeçalho. O Prisma, por exemplo, abre com
+    "Invalid `prisma.$queryRaw()` invocation:" e só depois diz o que houve
+    ("Can't reach database server at 127.0.0.1:5432") — que é a linha que
+    resolve o problema. Pulamos as linhas terminadas em dois-pontos.
+  */
+  const informative = lines.find((line) => !line.endsWith(':')) ?? lines[0] ?? '';
+  return informative ? `[dev] ${informative.slice(0, 300)}` : null;
+}
+
 /** Converte qualquer erro numa resposta segura para o cliente. */
 export function toPublicError(err: unknown): { status: number; body: PublicErrorShape } {
   if (err instanceof AppError) {
@@ -90,11 +117,20 @@ export function toPublicError(err: unknown): { status: number; body: PublicError
           code: err.code,
           message: err.expose ? err.message : GENERIC_MESSAGE,
           ...(err.expose && err.details ? { details: err.details } : {}),
+          ...(err.expose ? {} : hintField(err)),
         },
       },
     };
   }
-  return { status: 500, body: { error: { code: 'internal_error', message: GENERIC_MESSAGE } } };
+  return {
+    status: 500,
+    body: { error: { code: 'internal_error', message: GENERIC_MESSAGE, ...hintField(err) } },
+  };
+}
+
+function hintField(err: unknown): { details?: unknown } {
+  const hint = developmentHint(err);
+  return hint ? { details: hint } : {};
 }
 
 /** Log interno estruturado — nunca exposto ao usuário. */

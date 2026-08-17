@@ -100,15 +100,57 @@ OPENAI_API_KEY=sk-...
 | Comando | O que faz |
 | --- | --- |
 | `npm run dev` | Servidor de desenvolvimento (com worker embutido). |
+| `npm run dev:clean` | Apaga o cache `.next` e sobe o dev. Use após trocar de branch. |
+| `npm run clean` | Só apaga o cache `.next`. |
 | `npm run build` / `npm start` | Build e execução de produção. |
 | `npm run worker` | Worker dedicado da fila (produção multi-instância). |
-| `npm test` | Testes unitários (65). |
-| `npm run test:integration` | Testes de integração contra PostgreSQL real (45). |
+| `npm test` | Testes unitários (118). |
+| `npm run test:integration` | Testes de integração contra PostgreSQL real (49). |
 | `npm run typecheck` | Verificação de tipos. |
 | `npm run db:migrate` | Cria e aplica migração em desenvolvimento. |
 | `npm run db:deploy` | Aplica migrações em produção. |
 | `npm run db:seed` | Popula planos e a demonstração. |
 | `npm run db:studio` | Prisma Studio. |
+
+---
+
+## Quando algo quebra
+
+**`Cannot read properties of undefined (reading 'call')`** em qualquer tela, logo após
+trocar de branch ou atualizar o código:
+
+```bash
+npm run dev:clean
+```
+
+É o cache do Webpack em `.next` apontando para um módulo que mudou de lugar. Acontece
+sobretudo quando um arquivo vira diretório (foi o caso de
+`src/lib/integrations/datajud.ts` → `src/lib/integrations/datajud/`): o mapa de módulos
+guardado no cache ainda aponta para o arquivo apagado, `__webpack_require__` devolve
+`undefined` e o erro estoura no componente que importa aquele módulo. Não é erro de
+código — apagar `.next` resolve.
+
+**A tela diz "Não conseguimos concluir a operação"**: em desenvolvimento a mensagem vem
+acompanhada de `[dev] <causa real>`. As causas mais comuns são o PostgreSQL parado,
+`DATABASE_URL` errada ou as migrações/seed não aplicados:
+
+```bash
+pg_isready                 # o banco responde?
+npm run db:deploy          # migrações
+npm run db:seed            # planos + demonstração
+```
+
+Em produção esse detalhe não é enviado ao cliente — só a mensagem genérica.
+
+**A consulta ao DataJud falha**: rode o diagnóstico, que fala direto com o CNJ sem
+passar pela aplicação e imprime a resposta bruta.
+
+```bash
+node scripts/datajud-doctor.mjs tjgo 0801234-56.2026.8.09.0051
+```
+
+Se a resposta não for JSON (por exemplo "Host not in allowlist"), quem respondeu foi um
+proxy ou firewall da sua rede, não o CNJ — a própria interface distingue os dois casos.
 
 ---
 

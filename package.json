@@ -6,6 +6,8 @@
   "scripts": {
     "predev": "node scripts/copy-pdf-worker.mjs",
     "dev": "next dev",
+    "clean": "node -e \"require('node:fs').rmSync('.next',{recursive:true,force:true})\"",
+    "dev:clean": "npm run clean && npm run dev",
     "prebuild": "node scripts/copy-pdf-worker.mjs && prisma generate",
     "build": "next build",
     "start": "next start",
