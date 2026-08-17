@@ -165,10 +165,24 @@ line(`HTTP ${response.status} ${response.statusText}  (${elapsed} ms)`);
 rule();
 
 if (!response.ok) {
-  line('Resposta de erro (bruta, como veio do CNJ):');
+  line('Resposta de erro (bruta):');
   line(text.slice(0, 4000));
   rule();
-  if (response.status === 401 || response.status === 403) {
+
+  /*
+    O Elasticsearch responde JSON sempre, inclusive em erro. Corpo em texto
+    puro significa que quem respondeu foi um proxy ou firewall no caminho, e
+    não o CNJ — dizer "a chave foi recusada" aqui manda trocar uma chave que
+    está correta. Mesma regra usada em src/lib/integrations/datajud/client.ts.
+  */
+  const body = text.trim();
+  const doCnj = !body || body.startsWith('{') || body.startsWith('[');
+
+  if (!doCnj) {
+    line('→ Esta resposta NÃO veio do CNJ: alguém no caminho interceptou a chamada');
+    line('  (proxy, firewall ou política de saída da rede). A chave não está em');
+    line('  questão. Libere o acesso a api-publica.datajud.cnj.jus.br.');
+  } else if (response.status === 401 || response.status === 403) {
     line('→ A chave foi recusada. Confira DATAJUD_API_KEY e o prefixo do cabeçalho.');
   } else if (response.status === 404) {
     line(`→ O índice "${index}" não existe. Confira a sigla do tribunal.`);
