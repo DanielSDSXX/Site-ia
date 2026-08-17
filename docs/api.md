@@ -202,6 +202,36 @@ A `note` sempre declara as limitações do cálculo.
 
 ## Jurisprudência e memória
 
+### `GET /api/busca-juridica` — a busca da tela
+
+Endpoint único da tela **Busca jurídica**. Recebe o número do processo **ou** uma
+palavra-chave e consulta as duas fontes em paralelo, devolvendo os dois grupos numa
+resposta só.
+
+```
+GET /api/busca-juridica?q=cobrança indevida
+→ {
+    "query": "cobrança indevida",
+    "byCaseNumber": false,
+    "processes": [ … ],      // CNJ DataJud
+    "processesTotal": 1,
+    "processesError": null,
+    "index": "api_publica_tjgo",
+    "entendimentos": [ … ],  // acervo do escritório
+    "entendimentosError": null
+  }
+```
+
+Parâmetros: `q` (obrigatório), `court` (opcional — com número CNJ completo o tribunal
+sai dos próprios dígitos), `limit`, `includeDemo`.
+
+As fontes são independentes por `Promise.allSettled`: o CNJ fora do ar devolve
+`processesError` preenchido e **não** impede os entendimentos de aparecerem. Foi
+exatamente essa dependência que quebrava o buscador — uma fonte vazia zerava a tela
+inteira.
+
+Sem `q`, devolve `{ status, courts }` para a tela se montar.
+
 ### `GET /api/jurisprudence`
 Sem `q`: lista o acervo. Com `q`: busca híbrida (embedding + BM25) e devolve `score`.
 
