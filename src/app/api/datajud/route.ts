@@ -23,7 +23,8 @@ const querySchema = z.object({
 
 export async function GET(request: Request) {
   return handle(request, 'datajud.consult', async () => {
-    const ctx = await requirePermission('jurisprudence:read');
+    // Dado processual, não jurisprudência: quem lê processo pode consultar.
+    const ctx = await requirePermission('process:read');
     const url = new URL(request.url);
 
     // Sem `q`, devolve apenas o estado da integração e a lista de tribunais —

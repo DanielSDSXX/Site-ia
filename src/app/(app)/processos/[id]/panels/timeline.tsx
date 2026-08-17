@@ -5,6 +5,7 @@ import { useEvidenceViewer } from '@/components/evidence-viewer';
 import { formatDateLong } from '@/lib/utils';
 import { IconTimeline } from '@/components/icons';
 import type { ProcessDto } from '../types';
+import { CnjSyncButton } from './cnj-sync';
 
 export function TimelinePanel({ process }: { process: ProcessDto }) {
   const { open } = useEvidenceViewer();
@@ -18,14 +19,20 @@ export function TimelinePanel({ process }: { process: ProcessDto }) {
         <EmptyState
           icon={<IconTimeline className="size-5" />}
           title="Linha do tempo vazia"
-          description="Os eventos são extraídos das datas efetivamente citadas nos documentos. Envie as peças e execute a análise do processo."
+          description="Os eventos saem das datas citadas nos documentos e das movimentações oficiais do CNJ. Envie as peças e execute a análise, ou traga os andamentos direto do tribunal."
         />
+        <div className="border-t border-[var(--border)] px-6 py-4">
+          <CnjSyncButton processId={process.id} caseNumber={process.number} />
+        </div>
       </Card>
     );
   }
 
   return (
     <Card className="p-6">
+      <div className="mb-5 border-b border-[var(--border)] pb-4">
+        <CnjSyncButton processId={process.id} caseNumber={process.number} />
+      </div>
       <ol className="relative space-y-6 border-l border-[var(--border)] pl-6">
         {events.map((event) => {
           const document = process.documents.find((doc) => doc.id === event.documentId);
@@ -84,10 +91,18 @@ export function TimelinePanel({ process }: { process: ProcessDto }) {
         })}
       </ol>
 
+      {/*
+        Esta nota precisa acompanhar as fontes que a linha do tempo tem. Ela
+        dizia "não é um espelho da movimentação oficial do tribunal", o que
+        deixou de ser verdade quando a sincronização com o CNJ passou a gravar
+        os andamentos aqui — metade da lista virou exatamente isso.
+      */}
       <p className="mt-6 border-t border-[var(--border)] pt-4 text-[11.5px] leading-relaxed text-[var(--text-subtle)]">
-        A linha do tempo é montada a partir das datas presentes no texto dos documentos enviados.
-        Ela reflete o que está nos autos indexados — não é um espelho da movimentação oficial do
-        tribunal.
+        Duas origens, distinguíveis pelo selo de cada evento: os marcados como{' '}
+        <strong>identificado pela análise</strong> vêm das datas citadas no texto dos documentos
+        enviados; os demais são <strong>movimentações oficiais</strong> trazidas da API Pública do
+        CNJ pela sincronização. Os andamentos oficiais só ficam em dia até a última sincronização, e
+        cobrem apenas o que o tribunal publica no DataJud.
       </p>
     </Card>
   );

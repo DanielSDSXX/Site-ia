@@ -3,10 +3,10 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button, Card, CardHeader, ErrorNotice, InfoNotice } from '@/components/ui';
-import { apiPost } from '@/lib/client/api-client';
+import { apiGet, apiPost } from '@/lib/client/api-client';
 import { UploadDropzone, type PendingFile } from '@/components/upload-dropzone';
 import { formatProcessNumber, isValidProcessNumber } from '@/lib/utils';
-import { IconPlus, IconClose } from '@/components/icons';
+import { IconPlus, IconClose, IconSearch } from '@/components/icons';
 
 interface Party {
   name: string;
@@ -43,6 +43,19 @@ export function NewProcessForm({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [number, setNumber] = useState('');
+
+  /*
+    Campos que a API Pública do CNJ preenche. Ficam controlados para que o
+    botão "Buscar no CNJ" possa escrevê-los — o resto do formulário segue não
+    controlado, porque nada os preenche automaticamente.
+  */
+  const [court, setCourt] = useState('');
+  const [courtUnit, setCourtUnit] = useState('');
+  const [procedureClass, setProcedureClass] = useState('');
+  const [subject, setSubject] = useState('');
+  const [lookup, setLookup] = useState<
+    { state: 'idle' } | { state: 'loading' } | { state: 'done'; message: string } | { state: 'fail'; message: string }
+  >({ state: 'idle' });
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [parties, setParties] = useState<Party[]>([
     { name: '', role: 'PLAINTIFF', side: 'OURS' },
@@ -50,6 +63,73 @@ export function NewProcessForm({
   ]);
 
   const digits = number.replace(/\D/g, '');
+
+  /**
+   * Traz do CNJ o que a API Pública publica: tribunal, órgão julgador, classe
+   * e assuntos. Comarca e valor da causa não vêm — a API não os fornece, e a
+   * plataforma não preenche campo com palpite.
+   */
+  async function buscarNoCnj() {
+    setLookup({ state: 'loading' });
+
+    const response = await apiGet<{
+      processes: {
+        court: string;
+        judgingBody: string | null;
+        procedureClass: string | null;
+        subjects: string[];
+        situation: { label: string };
+        secrecy: { isSecret: boolean; label: string };
+      }[];
+      error: string | null;
+    }>(`/api/datajud?q=${encodeURIComponent(number)}&limit=1`);
+
+    if (!response.ok) {
+      setLookup({ state: 'fail', message: response.message });
+      return;
+    }
+    if (response.data.error) {
+      setLookup({ state: 'fail', message: response.data.error });
+      return;
+    }
+
+    const found = response.data.processes[0];
+    if (!found) {
+      setLookup({
+        state: 'fail',
+        message: 'O CNJ não retornou nenhum processo com esse número. Confira o número — ou preencha os campos à mão.',
+      });
+      return;
+    }
+
+    const preenchidos: string[] = [];
+    if (found.court) {
+      setCourt(found.court);
+      preenchidos.push('tribunal');
+    }
+    if (found.judgingBody) {
+      setCourtUnit(found.judgingBody);
+      preenchidos.push('vara');
+    }
+    if (found.procedureClass) {
+      setProcedureClass(found.procedureClass);
+      preenchidos.push('classe');
+    }
+    if (found.subjects.length > 0) {
+      setSubject(found.subjects.join(', '));
+      preenchidos.push('assunto');
+    }
+
+    setLookup({
+      state: 'done',
+      message:
+        (preenchidos.length > 0
+          ? `Preenchido pelo CNJ: ${preenchidos.join(', ')}. `
+          : 'O CNJ encontrou o processo, mas não trouxe dados para preencher. ') +
+        `Situação: ${found.situation.label}.` +
+        (found.secrecy.isSecret ? ` Atenção: ${found.secrecy.label}.` : ''),
+    });
+  }
   const numberWarning =
     digits.length === 20 && !isValidProcessNumber(number)
       ? 'O dígito verificador do padrão CNJ não confere. Revise o número antes de salvar.'
@@ -130,13 +210,58 @@ export function NewProcessForm({
             {numberWarning && (
               <p className="mt-1.5 text-[12px] text-[var(--risk-medium)]">{numberWarning}</p>
             )}
+
+            <div className="mt-2 flex flex-wrap items-center gap-2.5">
+              <Button
+                type="button"
+                size="sm"
+                onClick={buscarNoCnj}
+                loading={lookup.state === 'loading'}
+                disabled={digits.length !== 20}
+              >
+                <IconSearch className="size-3.5" />
+                Buscar dados no CNJ
+              </Button>
+              <span className="text-[11.5px] text-[var(--text-subtle)]">
+                {digits.length === 20
+                  ? 'Preenche tribunal, vara, classe e assunto com os dados oficiais.'
+                  : 'Informe os 20 dígitos para consultar o CNJ.'}
+              </span>
+            </div>
+
+            {lookup.state === 'done' && (
+              <p className="mt-1.5 text-[12px]" style={{ color: 'var(--risk-low)' }}>
+                {lookup.message}
+              </p>
+            )}
+            {lookup.state === 'fail' && (
+              <p className="mt-1.5 text-[12px] text-[var(--risk-medium)]">{lookup.message}</p>
+            )}
           </div>
 
-          <Field name="court" label="Tribunal" placeholder="TJGO" />
+          <Field name="court" label="Tribunal" placeholder="TJGO" value={court} onChange={setCourt} />
           <Field name="district" label="Comarca" placeholder="Goiânia" />
-          <Field name="courtUnit" label="Vara" placeholder="3ª Vara Cível" />
-          <Field name="procedureClass" label="Classe" placeholder="Procedimento Comum Cível" />
-          <Field name="subject" label="Assunto" placeholder="Cobrança indevida / dano moral" />
+          <Field
+            name="courtUnit"
+            label="Vara"
+            placeholder="3ª Vara Cível"
+            value={courtUnit}
+            onChange={setCourtUnit}
+          />
+          <Field
+            name="procedureClass"
+            label="Classe"
+            placeholder="Procedimento Comum Cível"
+            value={procedureClass}
+            onChange={setProcedureClass}
+          />
+          <Field
+            name="subject"
+            label="Assunto"
+            placeholder="Cobrança indevida / dano moral"
+            value={subject}
+            onChange={setSubject}
+          />
           <Field name="caseValue" label="Valor da causa (R$)" placeholder="15000,00" />
 
           <div>
@@ -276,21 +401,41 @@ export function NewProcessForm({
   );
 }
 
+/**
+ * Campo de texto do formulário.
+ *
+ * Aceita ser controlado (`value` + `onChange`) para que a consulta ao CNJ
+ * possa preenchê-lo; sem esses adereços segue não controlado, como antes.
+ */
 function Field({
   name,
   label,
   placeholder,
+  value,
+  onChange,
 }: {
   name: string;
   label: string;
   placeholder?: string;
+  value?: string;
+  onChange?: (value: string) => void;
 }) {
+  const controlled = value !== undefined && onChange !== undefined;
+
   return (
     <div>
       <label className="label" htmlFor={name}>
         {label}
       </label>
-      <input id={name} name={name} className="input" placeholder={placeholder} />
+      <input
+        id={name}
+        name={name}
+        className="input"
+        placeholder={placeholder}
+        {...(controlled
+          ? { value, onChange: (event) => onChange(event.target.value) }
+          : {})}
+      />
     </div>
   );
 }
