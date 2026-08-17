@@ -11,7 +11,11 @@ coverage/
 !.env.example
 
 .data/
-storage/
+# Diretório de uploads, quando STORAGE_LOCAL_DIR aponta para a raiz do projeto.
+# A barra inicial é obrigatória: sem ela o padrão casa QUALQUER pasta chamada
+# "storage" em qualquer profundidade — foi assim que src/lib/storage/ ficou de
+# fora do repositório e o módulo sumia em clones novos.
+/storage/
 *.log
 .DS_Store
 
