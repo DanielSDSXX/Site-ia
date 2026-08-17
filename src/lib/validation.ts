@@ -202,18 +202,73 @@ export const memoryItemSchema = z.object({
   tags: z.array(z.string().trim().max(40)).max(20).default([]),
 });
 
+/*
+  As mensagens vão escritas uma a uma, em português.
+
+  Sem elas o Zod devolve o texto padrão em inglês ("String must contain at
+  least 2 character(s)"), que na importação em lote chega direto à tela, ao
+  lado do número da linha — o usuário lê um erro técnico em outro idioma para
+  descobrir que faltou preencher a fonte.
+*/
 export const jurisprudenceImportSchema = z.object({
-  court: z.string().trim().min(2).max(120),
-  judgingBody: z.string().trim().max(160).optional().nullable(),
-  caseNumber: z.string().trim().min(3).max(60),
-  judgmentDate: z.coerce.date().optional().nullable(),
-  reporter: z.string().trim().max(160).optional().nullable(),
-  summary: z.string().trim().min(20, 'A ementa é obrigatória.').max(20_000),
-  thesis: z.string().trim().max(4000).optional().nullable(),
-  outcome: z.string().trim().max(200).optional().nullable(),
-  excerpt: z.string().trim().max(10_000).optional().nullable(),
-  sourceUrl: z.string().url('Informe a URL da fonte oficial.').max(500),
-  sourceName: z.string().trim().min(2).max(200),
+  court: z
+    .string()
+    .trim()
+    .min(2, 'Informe o tribunal.')
+    .max(120, 'O tribunal deve ter no máximo 120 caracteres.'),
+  judgingBody: z
+    .string()
+    .trim()
+    .max(160, 'O órgão julgador deve ter no máximo 160 caracteres.')
+    .optional()
+    .nullable(),
+  caseNumber: z
+    .string()
+    .trim()
+    .min(3, 'Informe o número do processo.')
+    .max(60, 'O número do processo deve ter no máximo 60 caracteres.'),
+  judgmentDate: z.coerce
+    .date({ invalid_type_error: 'Data inválida. Use 11/03/2026 ou 2026-03-11.' })
+    .optional()
+    .nullable(),
+  reporter: z
+    .string()
+    .trim()
+    .max(160, 'O nome do relator deve ter no máximo 160 caracteres.')
+    .optional()
+    .nullable(),
+  summary: z
+    .string()
+    .trim()
+    .min(20, 'A ementa é obrigatória e precisa ter ao menos 20 caracteres.')
+    .max(20_000, 'A ementa passou de 20.000 caracteres.'),
+  thesis: z
+    .string()
+    .trim()
+    .max(4000, 'A tese deve ter no máximo 4.000 caracteres.')
+    .optional()
+    .nullable(),
+  outcome: z
+    .string()
+    .trim()
+    .max(200, 'O resultado deve ter no máximo 200 caracteres.')
+    .optional()
+    .nullable(),
+  excerpt: z
+    .string()
+    .trim()
+    .max(10_000, 'O trecho deve ter no máximo 10.000 caracteres.')
+    .optional()
+    .nullable(),
+  sourceUrl: z
+    .string()
+    .url('Informe a URL da fonte oficial.')
+    .max(500, 'A URL deve ter no máximo 500 caracteres.'),
+  sourceName: z
+    .string()
+    .trim()
+    .min(2, 'Informe o nome da fonte (ex.: Portal do TJGO).')
+    .max(200, 'O nome da fonte deve ter no máximo 200 caracteres.'),
 });
 
 export const jurisprudenceSearchSchema = z.object({

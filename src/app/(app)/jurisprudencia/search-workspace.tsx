@@ -7,6 +7,7 @@ import { formatDate } from '@/lib/utils';
 import { IconAlert, IconExternal, IconScale, IconSearch } from '@/components/icons';
 import { DatajudProcessCard } from './datajud-process-card';
 import { ImportJurisprudenceForm } from './import-form';
+import { BulkImportPanel } from './bulk-import';
 import type { DatajudProcessDto } from './datajud-types';
 import type { JurisprudenceRow } from './types';
 
@@ -60,6 +61,7 @@ export function LegalSearchWorkspace({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -159,13 +161,28 @@ export function LegalSearchWorkspace({
           )}
 
           {canWrite && (
-            <button
-              type="button"
-              onClick={() => setShowImport((v) => !v)}
-              className="text-[var(--accent)] hover:underline"
-            >
-              {showImport ? 'Fechar' : 'Cadastrar entendimento'}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowImport((v) => !v);
+                  setShowBulk(false);
+                }}
+                className="text-[var(--accent)] hover:underline"
+              >
+                {showImport ? 'Fechar' : 'Cadastrar entendimento'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBulk((v) => !v);
+                  setShowImport(false);
+                }}
+                className="text-[var(--accent)] hover:underline"
+              >
+                {showBulk ? 'Fechar' : 'Importar planilha'}
+              </button>
+            </>
           )}
         </div>
       </Card>
@@ -187,6 +204,7 @@ export function LegalSearchWorkspace({
       )}
 
       {showImport && canWrite && <ImportJurisprudenceForm onDone={() => setShowImport(false)} />}
+      {showBulk && canWrite && <BulkImportPanel onDone={() => setShowBulk(false)} />}
 
       {loading && (
         <p className="flex items-center gap-2 text-[13px] text-[var(--text-muted)]">

@@ -104,8 +104,8 @@ OPENAI_API_KEY=sk-...
 | `npm run clean` | Só apaga o cache `.next`. |
 | `npm run build` / `npm start` | Build e execução de produção. |
 | `npm run worker` | Worker dedicado da fila (produção multi-instância). |
-| `npm test` | Testes unitários (118). |
-| `npm run test:integration` | Testes de integração contra PostgreSQL real (49). |
+| `npm test` | Testes unitários (130). |
+| `npm run test:integration` | Testes de integração contra PostgreSQL real (58). |
 | `npm run typecheck` | Verificação de tipos. |
 | `npm run db:migrate` | Cria e aplica migração em desenvolvimento. |
 | `npm run db:deploy` | Aplica migrações em produção. |

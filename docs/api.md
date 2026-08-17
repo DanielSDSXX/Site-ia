@@ -243,6 +243,34 @@ aparecem na interface com o selo **Fictícia — demonstração**.
 `sourceUrl` e `sourceName` são **obrigatórios**. Decisão sem fonte verificável não entra
 no acervo — é a regra que impede a plataforma de apresentar julgados não conferíveis.
 
+### `POST /api/jurisprudence/bulk` — importação em lote
+
+Recebe uma planilha colada (CSV, TSV ou o que sai ao copiar do Excel) e cria um
+entendimento por linha. É o caminho que dá conteúdo ao buscador: sem ementas
+cadastradas, a busca por entendimentos não tem o que devolver, porque **a API do CNJ
+não publica ementas**.
+
+```json
+{ "text": "Tribunal,Número do processo,Ementa,URL,Fonte\nTJGO,0801234-…,…", "dryRun": true }
+→ { "totalRows": 3, "valid": 2, "imported": 0, "duplicates": 0,
+    "errors": [ { "line": 4, "field": "sourceUrl", "message": "Informe a URL da fonte oficial." } ],
+    "missingColumns": [], "unknownHeaders": [], "preview": [ … ] }
+```
+
+`dryRun: true` confere sem gravar — é o que a tela usa para mostrar a prévia antes de o
+usuário confirmar. Duas garantias:
+
+- **Nada entra pela metade em silêncio.** Cada linha é validada sozinha e o relatório diz,
+  por número de linha, o que foi recusado e por quê.
+- **A regra da fonte vale linha a linha.** Importar em massa não é atalho para entrar
+  decisão não conferível no acervo.
+
+Reimportar a mesma planilha não duplica: mesmo tribunal + mesmo número conta como
+`duplicates`. Colunas aceitas em português ou inglês, com ou sem acento (`tribunal`,
+`ementa`, `número do processo`, `url`, `fonte`, `relator`, `data`, `tese`, `resultado`,
+`trecho`, `órgão julgador`); colunas desconhecidas voltam em `unknownHeaders` em vez de
+serem descartadas caladas.
+
 ---
 
 ## Consulta processual — CNJ DataJud
